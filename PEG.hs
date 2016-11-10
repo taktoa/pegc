@@ -1,9 +1,14 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell    #-}
 module Main where
 
 import           Data.Text               (Text)
 import qualified Data.Text               as Text
 
+import qualified Data.Aeson              as Aeson
+import qualified Data.Aeson.TH           as Aeson
+
+import           Control.Applicative
 import           Data.Data
 import           Data.Functor
 
@@ -17,20 +22,24 @@ import           Text.Parser.Token
 
 import           Text.Trifecta
 
-type Grammar = [Definition]
+type Grammar = [GrammarLine]
 
-data Definition
-  = Definition Label Identifier PEG
+data GrammarLine
+  = GLDefine Label Name PEG
+  | GLDeclare Name [Name]
+  | GLMacro Name [Name] PEG
+  | GLInclude Path
   deriving (Show, Eq, Typeable, Data)
 
 data PEG
   = PEGEmpty
   | PEGAnd PEG
   | PEGNot PEG
+  | PEGApply Name [PEG]
   | PEGChoice [PEG]
   | PEGSequence [PEG]
   | PEGTerminal Terminal
-  | PEGNonTerminal Identifier
+  | PEGNonTerminal Name
   deriving (Show, Eq, Typeable, Data)
 
 data Terminal
@@ -44,69 +53,78 @@ data Label
   | LabelNil
   | LabelCons
   | LabelSingle
-  | LabelName Identifier
+  | LabelName Name
   deriving (Show, Eq, Typeable, Data)
 
-type Identifier = Text
+type Path = Text
+type Name = Text
+
+$(concat <$> mapM (Aeson.deriveJSON Aeson.defaultOptions)
+  [ ''Label, ''Terminal, ''PEG, ''GrammarLine ])
 
 (|>) :: a -> (a -> b) -> b
 (|>) = flip ($)
 infixl 0 |>
 
+annotate :: String -> Parser a -> Parser a
+annotate s p = p <?> s
+
 labelP :: Parser Label
-labelP = [ LabelWrapper <$  symbol "_"
-         , LabelNil     <$  symbol "[]"
-         , LabelCons    <$  symbol "(:)"
-         , LabelSingle  <$  symbol "(:[])"
-         , LabelName    <$> identifierP
-         ] |> choice
+labelP = [ annotate "wrapper" (LabelWrapper <$  symbol "_")
+         , annotate "nil"     (LabelNil     <$  symbol "[]")
+         , annotate "cons"    (LabelCons    <$  symbol "(:)")
+         , annotate "single"  (LabelSingle  <$  symbol "(:[])")
+         , annotate "name"    (LabelName    <$> nameP)
+         ] |> choice |> annotate "label"
 
 pegP :: Parser PEG
-pegP = [ PEGEmpty       <$  symbol "eps"
-       , PEGTerminal    <$> terminalP
-       , PEGNonTerminal <$> identifierP
-       , PEGAnd         <$> (symbol "&" *> pegP)
-       , PEGNot         <$> (symbol "!" *> pegP)
-       , PEGChoice      <$> sepBy1 pegP (symbol "/")
-       , PEGSequence    <$> sepBy1 pegP whiteSpace
+pegP = [ annotate "empty"
+         (PEGEmpty       <$  symbol "eps")
+       , annotate "term"
+         (PEGTerminal    <$> terminalP)
+       , annotate "nonterm"
+         (PEGNonTerminal <$> nameP)
        , parens pegP
-       ] |> choice
+       , annotate "and"
+         (PEGAnd         <$> (symbol "&" *> pegP))
+       , annotate "not"
+         (PEGNot         <$> (symbol "!" *> pegP))
+       , annotate "choice"
+         (PEGChoice      <$> (pegP `sepBy1` token (char '/')))
+       , annotate "seq"
+         (PEGSequence    <$> (pegP `sepBy1` someSpace))
+       ] |> choice |> annotate "peg"
 
 terminalP :: Parser Terminal
-terminalP = [ TerminalAny   <$  symbol "any"
-            , TerminalChar  <$> (char '\'' *> characterP <* char '\'')
-            , TerminalRange <$> characterRangeP
-            ] |> choice
+terminalP = [ annotate "any"   (TerminalAny   <$  symbol "any")
+            , annotate "char"  (TerminalChar  <$> charLiteral)
+            , annotate "range" (TerminalRange <$> characterRangeP)
+            ] |> choice |> annotate "terminal" |> token
   where
-    characterP :: Parser Char
-    characterP = [ alphaNum
-                 , [ char 'u'
-                   , char 'n' $> '\n'
-                   , char 'r' $> '\r'
-                   ] |> choice |> escape
-                 ] |> choice
-      where
-        escape p = char '\\' *> p
-
     characterRangeP :: Parser (Char, Char)
-    characterRangeP = do char '['
-                         s <- characterP
-                         char '-'
-                         e <- characterP
-                         char ']'
-                         pure (s, e)
+    characterRangeP = token $ do
+      char '['
+      s <- charLiteral
+      char '-'
+      e <- charLiteral
+      char ']'
+      pure (s, e)
 
-identifierP :: Parser Identifier
-identifierP = _
+nameP :: Parser Name
+nameP = ((:) <$> upper <*> many (alphaNum <|> oneOf ""))
+        |> fmap Text.pack |> annotate "name" |> token
 
-definitionP :: Parser Definition
-definitionP = Definition
+definitionP :: Parser GrammarLine
+definitionP = GLDefine
               <$> labelP
-              <*> identifierP
-              <*> (symbol "::=" *> pegP)
+              <*> (symbol "." *> nameP)
+              <*> (symbol "::=" *> pegP <* semi)
 
 -- grammarP :: Parser Grammar
 -- grammarP = undefined
 
 main :: IO ()
-main = return ()
+main = do
+  str <- getLine
+  let Success gl = parseString definitionP mempty str
+  print $ Aeson.encode gl
