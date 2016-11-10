@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE TemplateHaskell    #-}
-module Main where
+module PEGC where
 
 import           Data.Text               (Text)
 import qualified Data.Text               as Text

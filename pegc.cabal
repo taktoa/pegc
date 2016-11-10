@@ -1,0 +1,47 @@
+name:                     pegc
+author:                   Remy Goldschmidt
+version:                  0.0.1
+stability:                Experimental
+build-type:               Simple
+cabal-version:            >= 1.10
+category:                 System
+copyright:                2016 Remy Goldschmidt <taktoa@gmail.com>
+extra-source-files:       README.md
+maintainer:               taktoa@gmail.com
+homepage:                 https://github.com/taktoa/pegc
+bug-reports:              https://github.com/taktoa/pegc/issues
+license-file:             LICENSE.md
+license:                  MIT
+synopsis:                 PEG parser generator targeting C++ with PEGTL.
+description:              A parser generator, similar to BNFC, that takes a
+                          parsing expression grammar and outputs C++ for it
+                          using the PEGTL library.
+
+source-repository head
+    type:     git
+    location: https://github.com/taktoa/pegc.git
+                          
+library
+    build-depends:        base                == 4.*
+                        , bytestring          == 0.10.*
+                        , text                == 1.2.*
+                        , lens                == 4.13.*
+                        , aeson               == 0.9.*
+                        , containers          == 0.5.*
+                        , parsers             == 0.12.*
+                        , trifecta            == 1.6.*
+    default-language:     Haskell2010
+    exposed-modules:      PEGC
+                          PEGC.Types
+    ghc-options:          -Wall -O2 -threaded -g
+                          -fno-warn-type-defaults
+                          -fno-warn-unused-do-bind
+                          -fno-warn-unused-imports
+    ghc-prof-options:     -auto-all -prof
+    hs-source-dirs:       src
+
+executable pegc
+    build-depends:        base == 4.*, pegc
+    default-language:     Haskell2010
+    ghc-options:          -Wall -O2 -threaded -g
+    main-is:              src/Main.hs
